@@ -1,0 +1,205 @@
+{
+  "realm": "REALM_NAME",
+  "accessTokenLifespan": 600,
+  "ssoSessionIdleTimeout": 1800,
+  "ssoSessionMaxLifespan": 36000,
+  "enabled": true,
+  "sslRequired": "external",
+  "registrationAllowed": false,
+  "duplicateEmailsAllowed": true,
+  "attributes": {
+    "iga.attestor": "tide"
+  },
+  "roles": {
+    "realm": [
+      {
+        "name": "_tide_enabled",
+        "description": "I-14: required on every Tide user or all Tide crypto operations fail."
+      },
+      {
+        "name": "_tide_x.selfencrypt",
+        "description": "Voucher gate only, NOT access control. Funds the ORK vendorsign check."
+      },
+      {
+        "name": "_tide_x.selfdecrypt",
+        "description": "Voucher gate only, NOT access control. Funds the ORK vendordecrypt check. Granted to everyone incl. admin so a decrypt attempt reaches the Forseti contract and is denied there, not earlier at the voucher layer."
+      },
+
+      {
+        "name": "coordinator",
+        "description": "App RBAC (server-side JWT check). Creates alerts, scopes them to a response team."
+      },
+      {
+        "name": "doctor",
+        "description": "App RBAC (server-side JWT check)."
+      },
+      {
+        "name": "nurse",
+        "description": "App RBAC (server-side JWT check). May file incident reports."
+      },
+      {
+        "name": "hospital-admin",
+        "description": "App RBAC (server-side JWT check). App/database administrator. Holds neither clinical-staff nor any tag role, so the ORKs refuse encrypt and decrypt for this user."
+      },
+
+      {
+        "name": "clinical-staff",
+        "description": "FORSETI-ENFORCED (encrypt direction). Contract requires this realm role in the doken before the ORKs will encrypt. Not held by hospital-admin."
+      },
+
+      {
+        "name": "response-team-infection-control",
+        "description": "FORSETI-ENFORCED tag role (decrypt). Ciphertext tagged hosp:response-team-infection-control is only decryptable by a doken carrying this exact realm role."
+      },
+      {
+        "name": "careteam-patient-1",
+        "description": "FORSETI-ENFORCED tag role (decrypt). Ciphertext tagged hosp:careteam-patient-1 is only decryptable by a doken carrying this role. Granting it is IGA-governed, so it cannot be self-granted via the app database."
+      },
+      {
+        "name": "emergency-responder",
+        "description": "General clinical role held by wider staff incl. Doctor B. Shows that a plausible hospital role is not enough: the contract needs the specific tag role."
+      },
+
+      {
+        "name": "default-roles-REALM_NAME",
+        "description": "${role_default-roles}",
+        "composite": true,
+        "composites": {
+          "realm": ["_tide_enabled", "_tide_x.selfencrypt", "_tide_x.selfdecrypt"]
+        }
+      }
+    ],
+    "client": {
+      "CLIENT_NAME": []
+    }
+  },
+  "defaultRole": {
+    "name": "default-roles-REALM_NAME",
+    "description": "${role_default-roles}",
+    "composite": true,
+    "clientRole": false
+  },
+  "clients": [
+    {
+      "clientId": "CLIENT_NAME",
+      "enabled": true,
+      "redirectUris": [
+        "CLIENT_APP_URL",
+        "CLIENT_APP_URL/*",
+        "CLIENT_APP_URL/silent-check-sso.html",
+        "CLIENT_APP_URL/auth/redirect"
+      ],
+      "webOrigins": ["CLIENT_APP_URL"],
+      "standardFlowEnabled": true,
+      "implicitFlowEnabled": false,
+      "publicClient": true,
+      "fullScopeAllowed": true,
+      "attributes": {
+        "dpop.bound.access.tokens": "true"
+      },
+      "protocolMappers": [
+        {
+          "name": "Tide User Key",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-usermodel-attribute-mapper",
+          "consentRequired": false,
+          "config": {
+            "introspection.token.claim": "true",
+            "userinfo.token.claim": "true",
+            "user.attribute": "tideUserKey",
+            "lightweight.claim": "true",
+            "id.token.claim": "true",
+            "access.token.claim": "true",
+            "claim.name": "tideuserkey",
+            "jsonType.label": "String"
+          }
+        },
+        {
+          "name": "audience (self): CLIENT_NAME",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-audience-mapper",
+          "config": {
+            "included.client.audience": "CLIENT_NAME",
+            "access.token.claim": "true",
+            "id.token.claim": "false"
+          }
+        },
+        {
+          "name": "Tide vuid",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-usermodel-attribute-mapper",
+          "consentRequired": false,
+          "config": {
+            "introspection.token.claim": "true",
+            "userinfo.token.claim": "true",
+            "user.attribute": "vuid",
+            "lightweight.claim": "true",
+            "id.token.claim": "true",
+            "access.token.claim": "true",
+            "claim.name": "vuid",
+            "jsonType.label": "String"
+          }
+        }
+      ]
+    }
+  ],
+  "components": {
+    "org.keycloak.userprofile.UserProfileProvider": [
+      {
+        "providerId": "declarative-user-profile",
+        "config": {
+          "kc.user.profile.config": [
+            "{\"attributes\":[{\"name\":\"username\",\"displayName\":\"${username}\",\"validations\":{\"length\":{\"min\":3,\"max\":255},\"username-prohibited-characters\":{},\"up-username-not-idn-homograph\":{}},\"permissions\":{\"view\":[\"admin\",\"user\"],\"edit\":[\"admin\",\"user\"]},\"multivalued\":false},{\"name\":\"email\",\"displayName\":\"${email}\",\"validations\":{\"email\":{},\"length\":{\"max\":255}},\"permissions\":{\"view\":[\"admin\",\"user\"],\"edit\":[\"admin\",\"user\"]},\"multivalued\":false},{\"name\":\"firstName\",\"displayName\":\"${firstName}\",\"permissions\":{\"view\":[\"admin\",\"user\"],\"edit\":[\"admin\",\"user\"]},\"multivalued\":false},{\"name\":\"lastName\",\"displayName\":\"${lastName}\",\"permissions\":{\"view\":[\"admin\",\"user\"],\"edit\":[\"admin\",\"user\"]},\"multivalued\":false}],\"groups\":[{\"name\":\"user-metadata\",\"displayHeader\":\"User metadata\",\"displayDescription\":\"Attributes, which refer to user metadata\"}],\"unmanagedAttributePolicy\":\"ENABLED\"}"
+          ]
+        }
+      }
+    ]
+  },
+  "authenticationFlows": [
+    {
+      "alias": "tidebrowser",
+      "providerId": "basic-flow",
+      "topLevel": true,
+      "authenticationExecutions": [
+        {
+          "authenticator": "auth-cookie",
+          "authenticatorFlow": false,
+          "requirement": "ALTERNATIVE",
+          "priority": 10,
+          "userSetupAllowed": false
+        },
+        {
+          "authenticatorConfig": "tide browser",
+          "authenticator": "identity-provider-redirector",
+          "authenticatorFlow": false,
+          "requirement": "ALTERNATIVE",
+          "priority": 25,
+          "userSetupAllowed": false
+        }
+      ]
+    }
+  ],
+  "authenticatorConfig": [
+    {
+      "alias": "tide browser",
+      "config": {
+        "defaultProvider": "tide"
+      }
+    }
+  ],
+  "browserFlow": "tidebrowser",
+  "requiredActions": [
+    {
+      "alias": "link-tide-account-action",
+      "name": "Link Tide Account",
+      "providerId": "link-tide-account-action",
+      "enabled": true
+    },
+    {
+      "alias": "UPDATE_PASSWORD",
+      "name": "Update Password",
+      "providerId": "UPDATE_PASSWORD",
+      "enabled": false
+    }
+  ]
+}

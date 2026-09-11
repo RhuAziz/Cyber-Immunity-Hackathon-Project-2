@@ -1,0 +1,38 @@
+{
+  "name": "hospital-emergency-platform",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Hospital emergency alerting and reporting platform secured with TideCloak policy-governed encryption",
+  "scripts": {
+    "dev": "next dev --webpack -p 3100",
+    "build": "next build --webpack",
+    "start": "next start -p 3100",
+    "typecheck": "tsc --noEmit",
+    "init": "node scripts/init-tidecloak.mjs",
+    "init:wipe": "node scripts/init-tidecloak.mjs --wipe",
+    "finalize": "node scripts/finalize.mjs",
+    "invite": "node scripts/invite-links.mjs",
+    "diagnose": "node scripts/diagnose.mjs",
+    "db:reset": "node scripts/reset-db.mjs",
+    "attack:steal-db": "node scripts/attack-steal-database.mjs",
+    "attack:admin-escalate": "node scripts/attack-admin-escalate.mjs"
+  },
+  "dependencies": {
+    "@tidecloak/js": "0.14.20",
+    "@tidecloak/nextjs": "0.14.20",
+    "asgard-tide": "0.14.20",
+    "better-sqlite3": "11.10.0",
+    "heimdall-tide": "0.14.20",
+    "jose": "5.9.6",
+    "next": "16.3.4",
+    "react": "19.2.0",
+    "react-dom": "19.2.0"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "7.6.11",
+    "@types/node": "22.10.2",
+    "@types/react": "19.0.2",
+    "@types/react-dom": "19.0.2",
+    "typescript": "5.7.2"
+  }
+}

@@ -1,0 +1,32 @@
+node_modules/
+.next/
+out/
+build/
+
+# Secrets and operator credentials — NEVER commit (AP-41)
+.env
+.env.local
+scripts/.skycloak-api-key
+
+# Tide adapter config: contains realm/client config + embedded JWKS.
+# Regenerate with `npm run init` rather than committing it.
+data/tidecloak.json
+
+# Application database (contains ciphertext, but also app metadata)
+data/hospital.db
+data/hospital.db-journal
+data/hospital.db-wal
+data/hospital.db-shm
+
+# Build artifacts from the Forseti compile harness
+forseti/harness/obj/
+forseti/harness/bin/
+
+*.log
+.DS_Store
+next-env.d.ts
+
+tidecloak/h2/
+tidecloak/enrollment-links.md
+
+enrollment-links.md
