@@ -10,6 +10,7 @@ import {
   DecryptDeniedError,
   PolicyMissingError,
 } from "./crypto-client";
+import { authenticatedFetch } from "./authenticated-fetch";
 
 /**
  * Shared hook for the pages that read or write protected records.
@@ -19,15 +20,16 @@ import {
  * so the policy argument survives — see crypto-client.ts.
  */
 export function useCrypto() {
-  const { secureFetch, authenticated } = useTideCloak();
+  const { secureFetch, getToken, authenticated } = useTideCloak();
   const [policyBytes, setPolicyBytes] = useState<Uint8Array | null>(null);
   const [policyError, setPolicyError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
 
   // secureFetch needs an ABSOLUTE url; a relative path throws before any request is sent.
   const api = useCallback(
-    (path: string, init?: RequestInit) => secureFetch(absoluteUrl(path), init),
-    [secureFetch]
+    (path: string, init?: RequestInit) =>
+      authenticatedFetch(secureFetch, getToken, absoluteUrl(path), init),
+    [getToken, secureFetch]
   );
 
   useEffect(() => {
@@ -38,7 +40,7 @@ export function useCrypto() {
     let cancelled = false;
     (async () => {
       try {
-        const bytes = await loadPolicyBytes((url, init) => secureFetch(url, init));
+        const bytes = await loadPolicyBytes(api);
         if (!cancelled) setPolicyBytes(bytes);
       } catch (err) {
         if (!cancelled) {
@@ -55,7 +57,7 @@ export function useCrypto() {
     return () => {
       cancelled = true;
     };
-  }, [authenticated, secureFetch]);
+  }, [api, authenticated]);
 
   /** Report a decrypt outcome so refusals appear in the audit trail. */
   const report = useCallback(

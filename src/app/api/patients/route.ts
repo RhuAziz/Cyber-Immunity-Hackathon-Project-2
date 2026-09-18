@@ -64,7 +64,7 @@ export const POST = withAuth(
         "requires to decrypt. Granting that role is an IGA-governed change needing quorum approval.",
     });
   },
-  { requireAnyRole: ["coordinator", "doctor", "hospital-admin"] }
+  { requireAnyRole: ["coordinator", "doctor", "nurse", "hospital-admin"] }
 );
 
 export const PATCH = withAuth(

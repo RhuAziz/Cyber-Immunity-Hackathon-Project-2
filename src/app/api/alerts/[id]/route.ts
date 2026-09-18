@@ -1,6 +1,12 @@
 import { NextResponse } from "next/server";
 import { withAuth } from "@/lib/api-auth";
-import { getAlert, isAlertRecipient, listAlertRecipients, logAccess } from "@/lib/db";
+import {
+  deleteAlertAndAudit,
+  getAlert,
+  isAlertRecipient,
+  listAlertRecipients,
+  logAccess,
+} from "@/lib/db";
 
 /**
  * A single alert's ciphertext.
@@ -73,3 +79,39 @@ export const GET = withAuth(async (req, ctx, params) => {
     yourRoles: ctx.roles,
   });
 });
+
+export const DELETE = withAuth(
+  async (req, ctx, params) => {
+    const alert = getAlert(params.id);
+
+    if (!alert) {
+      return NextResponse.json({ error: "Alert not found" }, { status: 404 });
+    }
+
+    if (alert.created_by !== ctx.username) {
+      logAccess({
+        username: ctx.username,
+        action: "delete-alert",
+        resource: alert.id,
+        outcome: "denied",
+        detail: "only the coordinator who raised the alert may delete it",
+      });
+      return NextResponse.json(
+        { error: "Only the coordinator who raised this alert may delete it" },
+        { status: 403 }
+      );
+    }
+
+    const result = deleteAlertAndAudit(alert.id, ctx.username);
+    if (!result) {
+      return NextResponse.json({ error: "Alert not found" }, { status: 404 });
+    }
+
+    return NextResponse.json({
+      ok: true,
+      deletedAlertId: alert.id,
+      deletedReports: result.deletedReports,
+    });
+  },
+  { requireAnyRole: ["coordinator"] }
+);

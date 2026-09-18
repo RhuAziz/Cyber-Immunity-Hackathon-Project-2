@@ -35,6 +35,7 @@ export default function DashboardPage() {
   const [alerts, setAlerts] = useState<AlertSummary[]>([]);
   const [status, setStatus] = useState<Record<string, Decrypted>>({});
   const [busy, setBusy] = useState<string | null>(null);
+  const [deleting, setDeleting] = useState<string | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
 
   const username = authenticated ? (getValueFromIdToken("preferred_username") as string) : null;
@@ -64,6 +65,27 @@ export default function DashboardPage() {
         : { state: "denied", requiredRole: result.deniedRole, message: result.message },
     }));
     setBusy(null);
+  };
+
+  const removeAlert = async (alert: AlertSummary) => {
+    if (!window.confirm("Delete this alert and all linked reports? This cannot be undone.")) return;
+
+    setDeleting(alert.id);
+    setLoadError(null);
+    try {
+      const res = await api(`/api/alerts/${alert.id}`, { method: "DELETE" });
+      if (!res.ok) throw new Error(await res.text());
+      setAlerts((prev) => prev.filter((a) => a.id !== alert.id));
+      setStatus((prev) => {
+        const next = { ...prev };
+        delete next[alert.id];
+        return next;
+      });
+    } catch (err) {
+      setLoadError((err as Error).message);
+    } finally {
+      setDeleting(null);
+    }
   };
 
   if (isInitializing) return <div className="card"><h1>Starting…</h1></div>;
@@ -146,15 +168,26 @@ export default function DashboardPage() {
                         requires <span className="badge role">{roleForTag(a.tag)}</span>
                       </div>
                     </div>
-                    {st.state === "locked" && (
-                      <button
-                        className="btn"
-                        onClick={() => reveal(a)}
-                        disabled={busy === a.id || cryptoLoading || !!policyError}
-                      >
-                        {busy === a.id ? "Asking the ORK network…" : "Decrypt"}
-                      </button>
-                    )}
+                    <div className="btn-row">
+                      {st.state === "locked" && (
+                        <button
+                          className="btn"
+                          onClick={() => reveal(a)}
+                          disabled={busy === a.id || deleting === a.id || cryptoLoading || !!policyError}
+                        >
+                          {busy === a.id ? "Asking the ORK network…" : "Decrypt"}
+                        </button>
+                      )}
+                      {hasRealmRole("coordinator") && a.createdBy === username && (
+                        <button
+                          className="btn secondary"
+                          onClick={() => void removeAlert(a)}
+                          disabled={busy === a.id || deleting === a.id}
+                        >
+                          {deleting === a.id ? "Deleting…" : "Delete"}
+                        </button>
+                      )}
+                    </div>
                   </div>
 
                   {st.state === "open" && (

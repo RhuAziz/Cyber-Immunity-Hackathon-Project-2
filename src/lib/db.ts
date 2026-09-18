@@ -199,6 +199,45 @@ export function getAlert(id: string): AlertRow | null {
   return (getDb().prepare("SELECT * FROM alerts WHERE id = ?").get(id) as AlertRow) ?? null;
 }
 
+export function deleteAlertAndAudit(alertId: string, username: string): { deletedReports: number } | null {
+  const d = getDb();
+  let result: { deletedReports: number } | null = null;
+
+  d.transaction(() => {
+    const alert = d.prepare("SELECT id, tag FROM alerts WHERE id = ?").get(alertId) as
+      | { id: string; tag: string }
+      | undefined;
+    if (!alert) return;
+
+    const count = d
+      .prepare("SELECT COUNT(*) AS count FROM reports WHERE alert_id = ?")
+      .get(alertId) as { count: number };
+
+    // Reports use ON DELETE SET NULL for general alert retention, but deleting an alert explicitly
+    // also removes its linked reports as required by the alert lifecycle.
+    d.prepare("DELETE FROM reports WHERE alert_id = ?").run(alertId);
+    // alert_recipients is removed by its ON DELETE CASCADE foreign key.
+    d.prepare("DELETE FROM alerts WHERE id = ?").run(alertId);
+
+    // Keep the deletion record in the same transaction, but do not store plaintext alert content.
+    d.prepare(
+      `INSERT INTO access_log (at, username, action, resource, outcome, detail)
+       VALUES (?, ?, ?, ?, ?, ?)`
+    ).run(
+      new Date().toISOString(),
+      username,
+      "delete-alert",
+      alertId,
+      "allowed",
+      `deleted alert and ${count.count} linked report(s); tag=${alert.tag}`
+    );
+
+    result = { deletedReports: count.count };
+  })();
+
+  return result;
+}
+
 export function isAlertRecipient(alertId: string, username: string): boolean {
   const row = getDb()
     .prepare("SELECT 1 AS x FROM alert_recipients WHERE alert_id = ? AND username = ?")

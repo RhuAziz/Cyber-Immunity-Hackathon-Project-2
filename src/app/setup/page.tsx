@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 import { useTideCloak } from "@tidecloak/nextjs";
 import { IAMService } from "@tidecloak/js";
 import { absoluteUrl, base64ToBytes, bytesToBase64, clearPolicyCache } from "@/lib/crypto-client";
+import { authenticatedFetch } from "@/lib/authenticated-fetch";
 
 /**
  * Deploy the Forseti contract and sign the encryption policy.
@@ -51,7 +52,11 @@ const STEP_LABELS = [
 ];
 
 export default function SetupPage() {
-  const { authenticated, isInitializing, login, hasRealmRole, secureFetch, token } = useTideCloak();
+  const { authenticated, isInitializing, login, hasRealmRole, secureFetch, getToken, token } = useTideCloak();
+  const api = useCallback(
+    (url: string, init?: RequestInit) => authenticatedFetch(secureFetch, getToken, url, init),
+    [getToken, secureFetch]
+  );
 
   const [phase, setPhase] = useState<Phase>("idle");
   const [steps, setSteps] = useState<Step[]>(
@@ -72,7 +77,7 @@ export default function SetupPage() {
   const refresh = useCallback(async () => {
     if (!authenticated) return;
     try {
-      const res = await secureFetch(absoluteUrl("/api/policy"));
+      const res = await api(absoluteUrl("/api/policy"));
       if (res.ok) {
         const j = await res.json();
         setDeployed({ contractId: j.contractId, deployedBy: j.deployedBy, deployedAt: j.deployedAt });
@@ -85,13 +90,13 @@ export default function SetupPage() {
 
     if (hasRealmRole("hospital-admin")) {
       try {
-        const res = await secureFetch(absoluteUrl("/api/policy/contract"));
+        const res = await api(absoluteUrl("/api/policy/contract"));
         if (res.ok) setLiveContractId((await res.json()).contractId);
       } catch {
         /* non-fatal */
       }
     }
-  }, [authenticated, hasRealmRole, secureFetch]);
+  }, [api, authenticated, hasRealmRole]);
 
   useEffect(() => {
     void refresh();
@@ -106,7 +111,7 @@ export default function SetupPage() {
     try {
       /* 1. contract source + identity */
       setStep(0, "active");
-      const cRes = await secureFetch(absoluteUrl("/api/policy/contract"));
+      const cRes = await api(absoluteUrl("/api/policy/contract"));
       if (!cRes.ok) throw new Error(`Could not load the contract: ${await cRes.text()}`);
       const { source, contractId, keyId, params } = await cRes.json();
 
@@ -117,13 +122,13 @@ export default function SetupPage() {
 
       /* 2. upload */
       setStep(1, "active");
-      const upRes = await secureFetch(absoluteUrl("/api/policy/contract"), { method: "POST" });
+      const upRes = await api(absoluteUrl("/api/policy/contract"), { method: "POST" });
       if (!upRes.ok) throw new Error(`Contract upload failed: ${await upRes.text()}`);
       setStep(1, "ok", "in the realm contract library");
 
       /* 3. admin policy */
       setStep(2, "active");
-      const apRes = await secureFetch(absoluteUrl("/api/policy/admin-policy"));
+      const apRes = await api(absoluteUrl("/api/policy/admin-policy"));
       if (!apRes.ok) {
         const t = await apRes.text();
         throw new Error(
@@ -234,7 +239,7 @@ export default function SetupPage() {
       policy.signature = signatures[0];
       const signedBytes = policy.toBytes(); // NOT request.encode(), NOT the bare signature
 
-      const saveRes = await secureFetch(absoluteUrl("/api/policy"), {
+      const saveRes = await api(absoluteUrl("/api/policy"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ policyB64: bytesToBase64(signedBytes), contractId }),
