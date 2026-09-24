@@ -427,3 +427,154 @@ pending the file from the Tide team.
 | Q-1 | Can the Forseti policy deployment be automated at all, or is the browser enclave approval strictly unavoidable for a one-time setup? | `UNRESOLVED` — pack says a human approval is required; to be confirmed by observation |
 | Q-2 | Does the enclave approval card render for our `ApprovalType`? The pack marks the `BasicCustom<Custom<X>>` double-wrap as PREDICTED, not network-verified. | `UNRESOLVED` |
 | Q-3 | How long does role propagation actually take after an IGA commit? Pack says "up to 120s". | `UNRESOLVED` |
+
+
+---
+
+## 2026-09-24 — Weekly integration results
+
+### User enrolment: Tide-side signature verification failure
+
+**Task**
+
+Complete Tide identity enrolment for the five demo users so the alert/report workflow can be tested with real Tide sessions.
+
+**Observed result**
+
+`hospital-admin` enrolled successfully. The other demo accounts were created in TideCloak, but the browser link step failed with:
+
+```text
+security check (signature verification) didn't pass
+```
+
+The local `tidecloak-hospital` container logs contained no corresponding signature-verification rejection. The live realm therefore showed the accounts and their assigned roles, but the affected users did not have a linked `tideUserKey`.
+
+Fresh enrollment links were regenerated with `node scripts/invite-links.mjs`. That regenerated links for `coordinator`, `nurse-a`, `doctor-a`, and `doctor-b`; `hospital-admin` was reported as already enrolled. The coordinator failure was not resolved in the application because the evidence points to the Tide enrollment-side handshake rather than an application route or role-mapping failure.
+
+**Status**: `UNRESOLVED` for the affected users. Do not treat a created username or assigned realm roles as successful Tide enrolment. The remaining work is Tide-side/browser investigation of the signature-verification failure.
+
+### `secureFetch` missing `Authorization` header
+
+**Task**
+
+Allow authenticated browser requests to the protected Next.js APIs while DPoP remains disabled.
+
+**Cause**
+
+The installed `@tidecloak/js` 0.14.20 SDK's `secureFetch` attaches authorization in its DPoP path. When DPoP is off, it delegates to `fetch(url, init)` without adding an `Authorization` header. The app was relying on `secureFetch` to attach the token, so `/api/policy` and `/api/policy/contract` returned:
+
+```json
+{"error":"Unauthorized","detail":"Missing Authorization header"}
+```
+
+The dashboard could still display the signed-in username and roles because those came from the browser authentication context; that did not prove that API requests contained a token.
+
+**Fix**
+
+Added `src/lib/authenticated-fetch.ts`. It calls the provider's current `getToken()`, adds `Authorization: Bearer <current-token>`, and then calls `secureFetch`. The wrapper was wired into `src/lib/use-crypto.ts` and `src/app/setup/page.tsx`.
+
+The wrapper is compatible with future DPoP enablement: when the SDK recognizes its current bearer token, it can replace the header with the DPoP request form.
+
+**Verification**
+
+`npm run typecheck` and `npm run build` both passed after the change. The build generated all 19 routes.
+
+**Status**: `VERIFIED` for the code fix, build validation, and subsequent browser policy/API verification.
+
+### Forseti policy deployment through the Tide enclave
+
+**Task**
+
+Upload `forseti/HospitalAccessPolicy.cs`, obtain the administrator policy, receive human Tide enclave approval, collect the ORK threshold signature, and store the signed policy for browser crypto operations.
+
+**Runtime result — verified**
+
+All nine setup steps passed in the browser:
+
+1. Load the C# source and compute its contract identity.
+2. Upload the contract through `/api/policy/contract`.
+3. Fetch the `tide-realm-admin` policy.
+4. Build the policy object.
+5. Create the Tide request.
+6. Approve the request in the Tide enclave.
+7. Attach the administrator policy after approval.
+8. Collect the ORK threshold signature.
+9. Store the signed policy through `/api/policy`.
+
+The deployed contract ID was:
+
+```text
+1CD5469719139BD1
+```
+
+The browser collected a 64-byte Ed25519 threshold signature and stored 479 signed bytes. The policy was approved in the Tide enclave and became available for the browser encryption/decryption flow.
+
+**Status**: `VERIFIED` in the browser.
+
+### Policy-governed encryption and decryption tests
+
+The encryption and decryption implementation remained unchanged:
+
+- `clinical-staff` is required to encrypt.
+- `hosp:response-team-infection-control` requires the corresponding response-team role to decrypt.
+- `hosp:careteam-patient-1` requires `careteam-patient-1` to decrypt.
+- The policy and Forseti contract are used through `IAMService.doEncrypt`/`doDecrypt` with signed policy bytes.
+- The Next.js server has no plaintext decrypt path.
+
+**Browser results — all verified**
+
+| User/action | Result |
+|---|---|
+| `coordinator` raised an alert | Alert was encrypted client-side and stored as ciphertext |
+| `coordinator` decrypted the alert | Allowed |
+| `doctor-a` decrypted the alert in a separate session | Allowed |
+| `doctor-b`, despite being on the recipient list | Refused by the ORK network because the session lacked `response-team-infection-control` |
+| `nurse-a` filed a patient report | Encrypted and tagged `hosp:careteam-patient-1` |
+| `hospital-admin` attempted to decrypt alerts | Refused |
+| `hospital-admin` attempted to decrypt reports | Refused |
+
+These tests verified that the application recipient list is separate from the cryptographic role requirement: being listed as an alert recipient did not allow `doctor-b` to decrypt without the required response-team role.
+
+**Status**: `VERIFIED` in separate browser sessions through the live ORK/Forseti path.
+
+### Attack demonstrations
+
+#### Stolen database
+
+`scripts/attack-steal-database.mjs` was run against the populated database. Grepping the raw database output for ward and severity terms produced zero plaintext matches. Alert, patient, and report payloads remained ciphertext.
+
+The readable metadata was:
+
+- Recipient lists
+- Who raised what and when
+- Ciphertext tags
+- Other database structure needed by the application, such as IDs and relationship metadata
+
+This confirms that the database theft scenario protects the alert/report content while leaving the documented metadata exposure visible.
+
+**Status**: `VERIFIED` by running the attack script.
+
+#### Malicious administrator database edit
+
+`scripts/attack-admin-escalate.mjs` was run and then reverted.
+
+The SQL `INSERT` adding `hospital-admin` to the `care_team` table succeeded at the application layer. In the browser, the patient page showed:
+
+```text
+Application care team: authorised
+ORK network: refusing decryption
+```
+
+The ORK network still refused decryption because the administrator's Tide session did not contain `careteam-patient-1`. The database edit changed the application's ACL view but did not change the Tide role or the Forseti decision. The inserted row was reverted afterwards.
+
+The administrator could still alter application-side ACLs, make the application display records to the wrong users, delete records, deny service, and read the database metadata. The administrator could not obtain the protected clinical plaintext through the SQLite edit.
+
+**Status**: `VERIFIED` in the browser; database change reverted afterwards.
+
+### What this week established
+
+1. The application-side bearer-token omission was found in the installed SDK behavior and fixed with a current-token wrapper.
+2. The local container does not explain the Tide-side enrolment signature failure; that issue remains separate from the verified policy and crypto results.
+3. The Forseti policy was approved in the Tide enclave, threshold-signed, and stored successfully.
+4. Browser tests verified authorised decryption, role-based ORK denial, client-side encryption, and the separation between application ACLs and cryptographic authorization.
+5. Both attack demonstrations verified ciphertext protection and the inability of a database administrator to grant themselves cryptographic decryption access, while also confirming that the administrator can still damage application availability and metadata/ACL integrity.
