@@ -15,37 +15,44 @@
 //            (we deploy it as "clinical-staff"). Non-clinical accounts — including the
 //            hospital administrator — cannot produce ciphertext under this policy at all.
 //
-//   DECRYPT  the caller's doken must carry the realm role NAMED BY THE CIPHERTEXT'S OWN TAG.
-//            The tag is namespaced with TagPrefix; strip the prefix and the remainder is the
-//            required realm role. So:
+//   DECRYPT  tags support two formats:
 //
-//              tag "hosp:careteam-patient-1"              -> requires realm role careteam-patient-1
-//              tag "hosp:response-team-infection-control" -> requires realm role
-//                                                            response-team-infection-control
+//            hosp:<role>
+//              The caller must hold the realm role named after the prefix. For example,
+//              hosp:careteam-patient-1 requires careteam-patient-1.
 //
-// WHY DERIVING THE ROLE FROM THE TAG IS SAFE
+//            hosp:user:<vuid>
+//              The caller's doken VUID must exactly match the VUID named by the tag, and
+//              the caller must also hold clinical-staff. This allows one named enrolled
+//              user to be selected for one ciphertext without changing the team-tag rules.
 //
-// A caller chooses the tag on a DECRYPT request, so it is fair to ask whether they can choose an
-// easier one. They cannot gain anything: the tag is bound into the ciphertext at encryption time
-// and the ORKs will only decrypt when the supplied tag matches. Naming a tag whose role you happen
-// to hold does not make someone else's differently-tagged ciphertext readable. And a new patient
-// needs only a new realm role, not a new contract or a new policy — while creating that role is an
-// IGA-governed change requiring quorum approval, which is precisely why it cannot be self-granted
-// by writing rows into our SQLite file.
+//   Examples:
 //
-// SCOPE LIMIT — STATED HERE BECAUSE THIS IS WHERE A READER WILL LOOK
+//              hosp:response-team-infection-control
+//                -> requires realm role response-team-infection-control
+//              hosp:user:f89a7e5d1103476596c4c9e51afabd4d003224c002ff09a46279c2c259cd7426
+//                -> requires that exact doken VUID plus clinical-staff
 //
-// Enforcement granularity is the ROLE, not the individual record. Everyone holding
-// careteam-patient-1 can decrypt every ciphertext tagged for patient 1. Per-record binding is
-// possible — the contract would demand proof of a capability naming one specific report — but
-// issuing such a capability is itself an IGA-governed change, so it would cost one human enclave
-// approval PER REPORT. That is unusable for ordinary clinical work, so we deliberately did not do
-// it. Per-record access (which alert went to which six recipients) is enforced by the application
-// ACL in SQLite behind server-side JWT verification, and is therefore NOT protected against an
-// attacker who can write to that database.
+// The application database may store the tag and recipient list, but the ORKs enforce the
+// cryptographic decision from the ciphertext tag and the caller's doken.
 //
-// The hook below keeps the stronger option one string away: set ReadCapabilityTemplate to a
-// non-empty value and per-record binding can be added without redesigning the policy.
+// WHY THE TAG CHECK IS SAFE
+//
+// The tag is bound into the ciphertext at encryption time. A caller cannot make a ciphertext
+// readable by changing the tag on a decrypt request: the supplied tag must match the ciphertext
+// envelope, and the ORKs then evaluate that tag against the caller's doken.
+//
+// Role tags delegate access to everyone holding the named realm role. Identity tags narrow access
+// to the doken VUID named by the tag, while also requiring clinical-staff. The application database
+// may store usernames and recipient lists for discovery, but changing those rows cannot change the
+// ORK decision.
+//
+// SCOPE LIMIT
+//
+// Identity tags bind one ciphertext to one VUID, but they are not a separate grant or revocation
+// system. Anyone whose current doken has the matching VUID and clinical-staff can decrypt. The
+// contract does not prove that a coordinator intentionally granted the VUID; that would require a
+// separate signed capability/grant policy. Existing role tags retain their role-level granularity.
 
 using Ork.Forseti.Sdk;
 using Cryptide.Tools;
@@ -70,10 +77,19 @@ public class Contract : IAccessPolicy
     // here and compared there, and ValidateExecutor refuses outright if this never ran.
     private readonly List<string> _tags = new List<string>();
     private bool _isDecrypt;
+    private bool _isIdentityTag;
+    private string _requiredVuid;
     private bool _dataValidated;
 
     public PolicyDecision ValidateData(DataContext ctx)
     {
+        // Reset per-request state before parsing. ValidateExecutor must never reuse a tag or
+        // identity captured by an earlier request.
+        _tags.Clear();
+        _isIdentityTag = false;
+        _requiredVuid = null;
+        _dataValidated = false;
+
         // Refuse to run under a policy shape this contract was not written for. A contract that
         // checks the executor is meaningless if deployed with ExecutionType.PUBLIC, because then
         // ValidateExecutor never runs at all.
@@ -143,9 +159,30 @@ public class Contract : IAccessPolicy
         {
             return PolicyDecision.Deny("Tag is not in the required namespace");
         }
-        if (tag.Length <= TagPrefix.Length)
+
+        string value = tag.Substring(TagPrefix.Length);
+        if (string.IsNullOrEmpty(value))
         {
-            return PolicyDecision.Deny("Tag carries no role after its prefix");
+            return PolicyDecision.Deny("Tag value is empty");
+        }
+
+        if (value.StartsWith("user:", StringComparison.Ordinal))
+        {
+            _isIdentityTag = true;
+            _requiredVuid = value.Substring("user:".Length);
+            if (string.IsNullOrEmpty(_requiredVuid) || _requiredVuid.IndexOf(':') >= 0)
+            {
+                return PolicyDecision.Deny("Identity tag must contain exactly one non-empty VUID");
+            }
+        }
+        else
+        {
+            // Existing role tags are exactly hosp:<role>: one non-empty role value and no
+            // additional identity fields. Normal team role names continue to work unchanged.
+            if (value.IndexOf(':') >= 0)
+            {
+                return PolicyDecision.Deny("Role tag contains unexpected fields");
+            }
         }
 
         _dataValidated = true;
@@ -165,15 +202,24 @@ public class Contract : IAccessPolicy
 
         if (!_isDecrypt)
         {
-            // Encryption: must be clinical staff. Deliberately NOT the tag role, so a nurse can
-            // file a report before the care team is finalised, while still excluding the
-            // administrator, who holds no clinical role.
+            // Encryption: must be clinical staff. The tag may name a different user who will
+            // decrypt later, so identity tags are checked against the executor only on decrypt.
             return Decision
                 .RequireNotExpired(executor)
                 .RequireRole(executor, EncryptRole);
         }
 
-        // Decryption: the ciphertext's own tag names the realm role required to read it.
+        if (_isIdentityTag)
+        {
+            // Identity-tag decryption requires both the current clinical-staff role and an exact
+            // match between the tag's VUID and the caller's Tide doken VUID.
+            return Decision
+                .RequireNotExpired(executor)
+                .RequireRole(executor, EncryptRole)
+                .Require(_requiredVuid == executor.UserId, "Caller VUID does not match the identity tag");
+        }
+
+        // Existing role-tag decryption remains role-based exactly as before.
         string requiredRole = _tags[0].Substring(TagPrefix.Length);
 
         return Decision

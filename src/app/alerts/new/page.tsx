@@ -7,6 +7,7 @@ import { useCrypto } from "@/lib/use-crypto";
 interface StaffMember {
   username: string;
   name: string;
+  vuid: string | null;
   roles: string[];
   enrolled: boolean;
 }
@@ -25,6 +26,8 @@ export default function NewAlertPage() {
 
   const [staff, setStaff] = useState<StaffMember[]>([]);
   const [recipients, setRecipients] = useState<string[]>([]);
+  const [accessMode, setAccessMode] = useState<"team" | "named">("team");
+  const [namedUsername, setNamedUsername] = useState("");
   const [team, setTeam] = useState("response-team-infection-control");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -72,7 +75,16 @@ export default function NewAlertPage() {
       // Encrypt EVERYTHING sensitive in the browser before it goes anywhere. The ward and severity
       // are included deliberately: knowing that Ward 7 is at high severity before any public
       // announcement is itself valuable to an attacker.
-      const { ciphertext, tag } = await encrypt(form, team);
+      const namedUser = staff.find((s) => s.username === namedUsername);
+      const namedVuid = namedUser?.vuid;
+      if (accessMode === "named" && (!namedUser?.enrolled || !namedVuid)) {
+        throw new Error("Select one enrolled user with a Tide VUID.");
+      }
+
+      const tagInput =
+        accessMode === "named" ? `user:${namedVuid}` : team;
+      // The existing tag helper adds the `hosp:` namespace, producing hosp:user:<vuid> in named mode.
+      const { ciphertext, tag } = await encrypt(form, tagInput);
 
       const res = await api("/api/alerts", {
         method: "POST",
@@ -126,7 +138,11 @@ export default function NewAlertPage() {
           <h3>Stored as ciphertext</h3>
           <p>
             The alert body was encrypted in your browser and the server received only the envelope.
-            Only holders of <span className="badge role">{team}</span> can decrypt it.
+            {accessMode === "named" ? (
+              <>The ciphertext tag is <span className="badge role">hosp:user:&lt;vuid&gt;</span> for the selected user.</>
+            ) : (
+              <>Only holders of <span className="badge role">{team}</span> can decrypt it.</>
+            )}
           </p>
         </div>
         <dl className="kv">
@@ -179,18 +195,93 @@ export default function NewAlertPage() {
         <input id="when" type="datetime-local" value={form.occurredAt}
           onChange={(e) => setForm({ ...form, occurredAt: e.target.value })} />
 
-        <label htmlFor="team">Response team (this sets the cryptographic restriction)</label>
-        <select id="team" value={team} onChange={(e) => setTeam(e.target.value)}>
-          <option value="response-team-infection-control">Infection control response team</option>
-          <option value="emergency-responder">All emergency responders (wider)</option>
+        <label htmlFor="access-mode">Response team / recipient mode</label>
+        <select
+          id="access-mode"
+          value={accessMode}
+          onChange={(e) => {
+            const nextMode = e.target.value as "team" | "named";
+            setAccessMode(nextMode);
+            setNamedUsername("");
+            if (nextMode === "team") {
+              setRecipients(
+                staff
+                  .filter((s) => s.roles.includes(team) && s.roles.includes("clinical-staff"))
+                  .map((s) => s.username)
+              );
+            } else {
+              setRecipients([]);
+            }
+          }}
+        >
+          <option value="team">Response team</option>
+          <option value="named">Named individual</option>
         </select>
-        <p className="muted">
-          The alert is tagged <span className="mono">hosp:{team}</span>. The ORK network will demand
-          the realm role <span className="badge role">{team}</span> from anyone attempting to
-          decrypt it, regardless of the recipient list below.
-        </p>
 
-        <fieldset>
+        {accessMode === "team" ? (
+          <>
+            <label htmlFor="team">Response team (this sets the cryptographic restriction)</label>
+            <select
+              id="team"
+              value={team}
+              onChange={(e) => {
+                const nextTeam = e.target.value;
+                setTeam(nextTeam);
+                setRecipients(
+                  staff
+                    .filter((s) => s.roles.includes(nextTeam) && s.roles.includes("clinical-staff"))
+                    .map((s) => s.username)
+                );
+              }}
+            >
+              <option value="response-team-infection-control">Infection control response team</option>
+              <option value="emergency-responder">All emergency responders (wider)</option>
+            </select>
+            <p className="muted">
+              The alert is tagged <span className="mono">hosp:{team}</span>. The ORK network will demand
+              the realm role <span className="badge role">{team}</span> from anyone attempting to
+              decrypt it, regardless of the recipient list below.
+            </p>
+          </>
+        ) : (
+          <>
+            <p className="muted">
+              The alert is tagged <span className="mono">hosp:user:&lt;vuid&gt;</span>. The ORK network
+              will allow decryption only for that user's Tide identity when the session also holds
+              the <span className="badge role">clinical-staff</span> role.
+            </p>
+            <fieldset>
+              <legend>Named individual (exactly one enrolled user)</legend>
+              {staff.filter((s) => s.enrolled && s.vuid).length === 0 ? (
+                <p className="muted">No enrolled users with a Tide VUID are available.</p>
+              ) : (
+                staff
+                  .filter((s) => s.enrolled && s.vuid)
+                  .map((s) => (
+                    <label key={s.username} className="check">
+                      <input
+                        type="radio"
+                        name="named-user"
+                        checked={namedUsername === s.username}
+                        onChange={() => {
+                          setNamedUsername(s.username);
+                          setRecipients([s.username]);
+                        }}
+                      />
+                      <span>
+                        {s.name} <span className="mono muted">({s.username})</span>
+                        <br />
+                        <span className="muted mono">vuid: {s.vuid}</span>
+                      </span>
+                    </label>
+                  ))
+              )}
+            </fieldset>
+          </>
+        )}
+
+        {accessMode === "team" && (
+          <fieldset>
           <legend>Recipients (application access control)</legend>
           <p className="muted">
             Who sees the alert listed in their dashboard. This is enforced by our API, and it is
@@ -230,7 +321,8 @@ export default function NewAlertPage() {
               );
             })
           )}
-        </fieldset>
+          </fieldset>
+        )}
 
         {error && <div className="notice error"><h3>Could not raise the alert</h3><pre>{error}</pre></div>}
 

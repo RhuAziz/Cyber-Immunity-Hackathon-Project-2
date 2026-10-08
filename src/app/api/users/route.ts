@@ -14,6 +14,7 @@ import { loadTideConfig } from "@/lib/tidecloakConfig";
 interface StaffMember {
   username: string;
   name: string;
+  vuid: string | null;
   roles: string[];
   /** Whether this user could actually DECRYPT ciphertext tagged for the given role. */
   enrolled: boolean;
@@ -81,6 +82,7 @@ export const GET = withAuth(async (req) => {
     staff.push({
       username: u.username,
       name: [u.firstName, u.lastName].filter(Boolean).join(" ") || u.username,
+      vuid: u.attributes?.vuid?.[0] ?? null,
       roles,
       enrolled: !!u.attributes?.tideUserKey?.[0],
     });
