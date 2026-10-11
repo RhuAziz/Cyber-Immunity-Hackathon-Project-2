@@ -27,11 +27,19 @@ npm install
 Copy-Item .env.example .env
 ```
 
-Edit `.env` and set a real value for `KC_BOOTSTRAP_ADMIN_PASSWORD`. Use port `3100` for this project:
+Edit `.env` and set a real value for `KC_BOOTSTRAP_ADMIN_PASSWORD`. Before running `npm run init`, check that the app origin matches the port used by `npm run dev`:
 
 ```text
 CLIENT_APP_URL=http://localhost:3100
 ```
+
+If the realm was already initialized with the wrong origin, run:
+
+```powershell
+node scripts/set-app-origin.mjs http://localhost:3100
+```
+
+This updates the registered redirect/web origin, re-signs the Tide IdP settings, and refreshes the adapter. In MultiAdmin mode, the origin change may require approval in the TideCloak Change Requests view.
 
 Do not commit `.env`.
 
