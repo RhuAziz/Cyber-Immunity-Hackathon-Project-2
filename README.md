@@ -39,7 +39,7 @@ If the realm was already initialized with the wrong origin, run:
 node scripts/set-app-origin.mjs http://localhost:3100
 ```
 
-This updates the registered redirect/web origin, re-signs the Tide IdP settings, and refreshes the adapter. In MultiAdmin mode, the origin change may require approval in the TideCloak Change Requests view.
+This updates the registered redirect/web origin, re-signs the Tide IdP settings, and refreshes the adapter. In MultiAdmin mode, the resulting change requests may require approval in the TideCloak Change Requests view. Approve them one at a time and wait for each request to commit before approving the next; approving them together can make later commits fail with a quorum signature hash mismatch.
 
 Do not commit `.env`.
 
