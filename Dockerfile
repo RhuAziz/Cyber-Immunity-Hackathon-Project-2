@@ -27,4 +27,4 @@ COPY --from=builder /app/next-env.d.ts ./next-env.d.ts
 
 EXPOSE 3100
 
-CMD ["sh", "-c", "node -e \"const fs=require('fs'); const p='data/tidecloak.json'; const c=JSON.parse(fs.readFileSync(p, 'utf8')); c['auth-server-url']='http://tidecloak:8080/'; fs.writeFileSync(p, JSON.stringify(c));\" && npm run start"]
+CMD ["npm", "run", "start"]

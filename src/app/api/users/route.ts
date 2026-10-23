@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { withAuth } from "@/lib/api-auth";
-import { loadTideConfig } from "@/lib/tidecloakConfig";
+import { loadTideConfig, internalTideCloakUrl } from "@/lib/tidecloakConfig";
 
 /**
  * Staff directory, used by the coordinator to choose alert recipients.
@@ -22,7 +22,7 @@ interface StaffMember {
 
 export const GET = withAuth(async (req) => {
   const config = loadTideConfig();
-  const authServerUrl = config["auth-server-url"].replace(/\/+$/, "");
+  const authServerUrl = internalTideCloakUrl(config);
   const realm = config.realm;
 
   const adminUser = process.env.KC_BOOTSTRAP_ADMIN_USERNAME || "admin";

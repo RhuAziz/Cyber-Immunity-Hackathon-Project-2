@@ -23,6 +23,8 @@ services:
     container_name: hospital-emergency-app
     ports:
       - "3100:3100"
+    volumes:
+      - ./data:/app/data
     env_file:
       - .env
     environment:

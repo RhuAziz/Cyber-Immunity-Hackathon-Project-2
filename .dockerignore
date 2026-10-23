@@ -1,0 +1,8 @@
+.env
+.env.*
+data/**
+!data/tidecloak.json
+node_modules
+.next
+.git
+tidecloak/h2

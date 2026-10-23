@@ -3,7 +3,7 @@ import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { withAuth } from "@/lib/api-auth";
-import { loadTideConfig } from "@/lib/tidecloakConfig";
+import { loadTideConfig, internalTideCloakUrl } from "@/lib/tidecloakConfig";
 
 /**
  * The Forseti contract source, its identity hash, and the REST upload.
@@ -69,7 +69,7 @@ export const POST = withAuth(
   async () => {
     const { source, contractId } = readContract();
     const config = loadTideConfig();
-    const authServerUrl = config["auth-server-url"].replace(/\/+$/, "");
+    const authServerUrl = internalTideCloakUrl(config);
     const realm = config.realm;
 
     const adminPassword = process.env.KC_BOOTSTRAP_ADMIN_PASSWORD;

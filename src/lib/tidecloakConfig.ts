@@ -76,6 +76,10 @@ export function loadTideConfig(): TideConfig {
   return parsed;
 }
 
+export function internalTideCloakUrl(config: TideConfig = loadTideConfig()): string {
+  return (process.env.TIDECLOAK_LOCAL_URL || config["auth-server-url"]).replace(/\/+$/, "");
+}
+
 /** The issuer string TideCloak puts in the `iss` claim. */
 export function expectedIssuer(config: TideConfig = loadTideConfig()): string {
   return `${config["auth-server-url"].replace(/\/+$/, "")}/realms/${config.realm}`;
