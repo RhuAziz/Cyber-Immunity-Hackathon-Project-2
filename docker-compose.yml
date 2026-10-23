@@ -1,0 +1,35 @@
+services:
+  tidecloak:
+    image: tideorg/tidecloak-dev:latest
+    container_name: tidecloak-hospital
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./tidecloak/h2:/opt/keycloak/data/h2
+    environment:
+      KC_BOOTSTRAP_ADMIN_USERNAME: ${KC_BOOTSTRAP_ADMIN_USERNAME:-admin}
+      KC_BOOTSTRAP_ADMIN_PASSWORD: ${KC_BOOTSTRAP_ADMIN_PASSWORD:?Set KC_BOOTSTRAP_ADMIN_PASSWORD in .env}
+    healthcheck:
+      test: ["CMD-SHELL", "bash -c 'exec 3<>/dev/tcp/127.0.0.1/8080'" ]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 30s
+
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: hospital-emergency-app
+    ports:
+      - "3100:3100"
+    env_file:
+      - .env
+    environment:
+      NODE_ENV: production
+      CLIENT_APP_URL: http://localhost:3100
+      TIDECLOAK_LOCAL_URL: http://tidecloak:8080
+    depends_on:
+      tidecloak:
+        condition: service_healthy
+    restart: unless-stopped
