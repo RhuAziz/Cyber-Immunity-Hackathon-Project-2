@@ -7,6 +7,8 @@ COPY package*.json ./
 RUN npm ci
 
 COPY . .
+ARG NEXT_PUBLIC_TIDE_DPOP=off
+ENV NEXT_PUBLIC_TIDE_DPOP=${NEXT_PUBLIC_TIDE_DPOP}
 RUN npm run build
 
 # Run the compiled application

@@ -20,6 +20,8 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
+      args:
+        NEXT_PUBLIC_TIDE_DPOP: ${NEXT_PUBLIC_TIDE_DPOP:-off}
     container_name: hospital-emergency-app
     ports:
       - "3100:3100"
