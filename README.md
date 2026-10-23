@@ -26,6 +26,22 @@ This guide assumes Windows PowerShell and the project directory:
 C:\Users\nadia\Tidecloack app
 ```
 
+## Docker deployment
+
+After the project has been bootstrapped, the whole stack can be started with:
+
+```powershell
+docker compose up --build
+```
+
+The app is then available at [http://localhost:3100](http://localhost:3100) and TideCloak at [http://localhost:8080](http://localhost:8080). Stop both containers with:
+
+```powershell
+docker compose down
+```
+
+This does not replace the initial realm bootstrap. A first-time setup still requires `npm run init`, browser account enrollment from `tidecloak\\enrollment-links.md`, `npm run finalize`, and policy deployment at `/setup`. Tide enrollment and policy approval require a browser and human approval in the Tide enclave.
+
 ## Setup
 
 Run these steps in order from the project directory.
